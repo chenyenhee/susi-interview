@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>면접 학습지 생성기</title>
+<style>
+/* =========================================================================
+   면접 학습지 생성기
+   면접질문지_생성기.html 이 만들어 둔 질문지(interview_qs_*)를 재료로,
+   학생이 직접 답을 써 보는 학습지를 뽑는다. AI를 부르지 않으므로
+   API Key·인터넷·엑셀이 모두 필요 없다.
+
+   치수는 화면과 인쇄가 같도록 모두 mm로 잡는다. 화면의 흰 종이 폭이 곧
+   A4 폭(210mm)이라, 화면에서 한 줄에 들어간 만큼 종이에도 그대로 들어간다.
+   ========================================================================= */
+
+:root{
+  --primary:#0d9488; --primary-dark:#0f766e;
+  --ink:#334155; --muted:#64748b; --border:#e2e8f0;
+
+  /* 손글씨 줄 간격. 8mm 아래로 내리면 고등학생 글씨가 줄에 걸린다. */
+  --line-h:9mm;
+  --line-h-sub:7.5mm;     /* 꼬리질문용 — 짧게 답하는 자리 */
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Pretendard','Malgun Gothic',system-ui,sans-serif;
+     color:var(--ink); background:#e2e8f0; font-size:0.95rem; line-height:1.6;}
+button,select,input{font-family:inherit;}
+
+/* ---------- 질문지가 없을 때 ---------- */
+#empty-view{display:none; min-height:100vh; align-items:center; justify-content:center; padding:2rem 1rem;}
+.empty-box{background:#fff; border-radius:16px; box-shadow:0 12px 34px -12px rgba(0,0,0,.14);
+           padding:2.6rem 2.4rem; max-width:560px; width:100%; text-align:center;}
+.empty-box h1{font-size:1.5rem; font-weight:800; color:#0f172a; margin-bottom:.5rem;}
+.empty-box p{color:var(--muted); font-size:.9rem; margin-bottom:.4rem;}
+.empty-box ol{text-align:left; margin:1rem 0 1.2rem 1.3rem; font-size:.9rem; color:#475569;}
+.empty-box li{margin:.35rem 0;}
+.empty-box code{background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:.85em;}
+
+/* ---------- 기본 뼈대 ---------- */
+.layout{display:flex; min-height:100vh;}
+.sidebar{width:250px; flex-shrink:0; background:#fff; border-right:1px solid var(--border);
+         display:flex; flex-direction:column; position:sticky; top:0; height:100vh;}
+.sidebar h2{font-size:.95rem; font-weight:800; color:#0f172a; padding:16px 18px 6px;}
+.sidebar .meta{font-size:.78rem; color:var(--muted); padding:0 18px 10px; line-height:1.45;}
+.student-list{list-style:none; overflow-y:auto; flex:1;}
+.student-item{display:flex; align-items:center; gap:8px; padding:9px 18px; cursor:pointer;
+              border-left:3px solid transparent; font-size:.9rem;}
+.student-item:hover{background:#f0fdfa;}
+.student-item.active{background:#ccfbf1; border-left-color:var(--primary); font-weight:700;}
+.student-num{display:inline-block; min-width:22px; text-align:right; color:var(--muted); font-size:.82rem;}
+.cnt{margin-left:auto; font-size:.72rem; color:var(--primary-dark); background:#ccfbf1;
+     border-radius:9px; padding:1px 7px; font-weight:700;}
+.side-foot{padding:12px 18px; border-top:1px solid var(--border);}
+
+.main{flex:1; padding:18px 22px 60px; min-width:0;}
+
+.btn{background:var(--primary); color:#fff; border:none; border-radius:7px;
+     padding:8px 14px; font-size:.86rem; font-weight:700; cursor:pointer;}
+.btn:hover{background:var(--primary-dark);}
+.btn.gray{background:#64748b;} .btn.gray:hover{background:#475569;}
+.btn.sm{padding:5px 10px; font-size:.8rem;}
+
+.toolbar{background:#fff; border:1px solid var(--border); border-radius:10px;
+         padding:11px 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;}
+.toolbar label{font-size:.82rem; color:#475569; display:flex; align-items:center; gap:5px;}
+.toolbar select{padding:5px 7px; border:1px solid #cbd5e1; border-radius:6px; font-size:.82rem; color:#334155;}
+.grow{flex:1;}
+.tool-title{font-size:.9rem; font-weight:800; color:#0f172a;}
+
+.tip{background:#fffbeb; border:1px solid #fde68a; border-radius:9px; padding:8px 13px;
+     margin-bottom:12px; font-size:.8rem; color:#92400e;}
+.tip b{color:#78350f;}
+
+.pick-bar{background:#f0fdfa; border:1px solid #99f6e4; border-radius:9px;
+          padding:9px 13px; margin-bottom:12px; font-size:.84rem; color:#115e59;}
+.pick-bar a{display:inline-block; margin:3px 5px 3px 0; padding:4px 10px; background:#fff;
+            border:1px solid #5eead4; border-radius:14px; color:#0f766e; cursor:pointer; font-weight:600;}
+.pick-bar a:hover{background:#ccfbf1;}
+.pick-bar a.on{background:var(--primary); border-color:var(--primary); color:#fff;}
+
+.placeholder{background:#fff; border:2px dashed #cbd5e1; border-radius:12px;
+             padding:70px 20px; text-align:center; color:var(--muted);}
+.placeholder .big{font-size:2.6rem; margin-bottom:10px;}
+
+/* =========================================================================
+   학습지 본문 — 화면에서도 A4 폭 그대로
+   ========================================================================= */
+.paper{background:#fff; box-shadow:0 6px 22px -10px rgba(0,0,0,.2);
+       width:210mm; max-width:100%; margin:0 auto;
+       padding:15mm 14mm; font-size:10.5pt; line-height:1.55;}
+
+.ws-head{border-bottom:2.4pt solid var(--primary); padding-bottom:3mm; margin-bottom:2mm;}
+.ws-head h1{font-size:16pt; font-weight:800; color:#0f172a; letter-spacing:-.4px;}
+.ws-head .who{margin-top:2mm; font-size:10pt; color:#475569;}
+.ws-head .who b{color:#0f172a;}
+.ws-head .unis{margin-top:1.5mm; font-size:9.5pt; color:#0f766e;}
+.fill{display:inline-block; border-bottom:.6pt solid #94a3b8; min-width:22mm;}
+
+.guide{background:#f0fdfa; border:.6pt solid #99f6e4; border-left:2.4pt solid var(--primary);
+       border-radius:1.5mm; padding:3mm 4mm; margin:4mm 0 6mm; font-size:9.5pt; color:#115e59;}
+.guide b{color:#0f766e;}
+
+.profile{background:#f8fafc; border:.6pt solid var(--border); border-radius:1.5mm;
+         padding:3mm 4mm; margin-bottom:5mm; font-size:9.5pt; color:#475569;}
+
+.sec{margin:7mm 0 3.5mm; padding-bottom:1.5mm; border-bottom:1.2pt solid #cbd5e1;
+     font-size:12pt; font-weight:800; color:#0f172a;}
+.sec small{display:block; font-size:8.5pt; font-weight:600; color:var(--muted); margin-top:1mm;}
+.sec.uni{border-bottom-color:#5eead4; color:#0f766e;}
+
+/* ---- 질문 한 덩이 ---- */
+.q{border:.6pt solid var(--border); border-radius:2mm; padding:4mm 4.5mm; margin-bottom:4mm;}
+.q-head{display:flex; gap:2.5mm; align-items:flex-start; margin-bottom:2.5mm;}
+.q-no{flex-shrink:0; background:var(--primary); color:#fff; border-radius:1.5mm;
+      padding:.6mm 2.2mm; font-size:9pt; font-weight:800; margin-top:.6mm;}
+.q-text{font-size:11pt; font-weight:700; color:#0f172a; line-height:1.5;}
+
+.ev{background:#f8fafc; border-left:1.2pt solid #cbd5e1; border-radius:0 1.5mm 1.5mm 0;
+    padding:2mm 3mm; margin:2mm 0; font-size:9pt; color:#475569;}
+.ev .src{display:block; font-size:8pt; font-weight:700; color:var(--primary-dark); margin-bottom:.5mm;}
+
+.lbl{font-size:9pt; font-weight:800; color:#475569; margin:3.5mm 0 1mm;
+     display:flex; align-items:baseline; gap:2mm; flex-wrap:wrap;}
+.amount{font-size:8.5pt; font-weight:700; color:var(--primary-dark);
+        background:#ccfbf1; border-radius:1mm; padding:.3mm 2mm;}
+
+/* 손글씨 줄. 마지막 줄에만 분량 눈금을 달아 어디까지 쓰면 되는지 보이게 한다. */
+.lines{position:relative;}
+.lines div{border-bottom:.5pt solid #cbd5e1; height:var(--line-h);}
+.lines.sub div{border-bottom:.5pt dotted #cbd5e1; height:var(--line-h-sub);}
+.lines .mark{position:absolute; right:0; bottom:-3.6mm; font-size:7.5pt;
+             color:#94a3b8; border:none; height:auto;}
+
+.fu{margin:1mm 0 0 0;}
+.fu li{list-style:none; font-size:9.5pt; color:#334155; margin-bottom:2mm;}
+.fu li .bullet{color:var(--primary-dark); font-weight:800; margin-right:1mm;}
+
+.hint-inline{background:#fffbeb; border:.6pt solid #fde68a; border-radius:1.5mm;
+             padding:2.5mm 3.5mm; margin-top:3mm; font-size:9pt; color:#92400e;}
+.hint-inline ul{margin:1mm 0 0 4mm;}
+.hint-inline li{margin:.6mm 0;}
+
+/* ---- 용어 ---- */
+.terms{width:100%; border-collapse:collapse; font-size:9.5pt;}
+.terms th,.terms td{border:.6pt solid var(--border); padding:2.5mm 3mm; text-align:left; vertical-align:top;}
+.terms th{background:#f1f5f9; font-weight:700; color:#475569; font-size:9pt;}
+.terms .t-src{display:block; font-size:8pt; color:var(--muted); margin-top:.5mm; font-weight:500;}
+.terms .t-q{color:#0f766e; font-size:9pt;}
+.terms .w-lines div{border-bottom:.5pt solid #cbd5e1; height:7.5mm;}
+
+/* ---- 점검표 ---- */
+.check{background:#f0fdfa; border:.6pt solid #99f6e4; border-radius:2mm; padding:3.5mm 4.5mm;}
+.check li{list-style:none; font-size:9.5pt; margin:2mm 0; color:#115e59;}
+.check li::before{content:'□'; margin-right:2mm; color:var(--primary); font-weight:800;}
+
+/* ---- 별지(힌트 모음) ---- */
+.annex{margin-top:9mm; border-top:1.2pt dashed #cbd5e1; padding-top:6mm;}
+.annex-head{background:#fffbeb; border:.6pt solid #fde68a; border-radius:2mm;
+            padding:3mm 4mm; margin-bottom:5mm; font-size:9.5pt; color:#92400e;}
+.annex-head b{color:#78350f;}
+.annex-who{font-size:9pt; color:var(--muted); margin-bottom:3mm;}
+.a-item{margin-bottom:3.5mm; font-size:9.5pt;}
+.a-item .a-q{font-weight:700; color:#0f172a; margin-bottom:.8mm;}
+.a-item ul{margin-left:4.5mm; color:#475569;}
+.a-item li{margin:.6mm 0;}
+.a-term{margin-bottom:2.5mm; font-size:9.5pt;}
+.a-term b{color:#0f766e;}
+
+/* =========================================================================
+   인쇄 — A4에서 덩어리가 쪼개지지 않게
+   ========================================================================= */
+@page{ size:A4; margin:15mm 14mm; }
+
+@media print{
+  body{background:#fff;}
+  .print-hide{display:none !important;}
+  .layout{display:block;}
+  .sidebar{display:none;}
+  .main{padding:0;}
+
+  /* 화면용 여백·그림자를 걷어낸다. 여백은 @page가 맡는다. */
+  .paper{box-shadow:none; width:auto; max-width:none; margin:0; padding:0;}
+
+  /* 옅은 배경색이 인쇄에서 날아가면 안내 상자와 표 머리가 구분되지 않는다. */
+  *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+
+  /* 질문 한 덩이는 통째로 한 쪽에. 그래도 안 들어가면 덩이 '안에서'
+     줄 단위로 끊기지 않도록 아래 조각들에도 따로 금지를 건다. */
+  .q{ break-inside:avoid; page-break-inside:avoid; }
+  .q-head,.ev,.ans-wrap,.hint-inline,.fu li{ break-inside:avoid; page-break-inside:avoid; }
+
+  /* 제목만 남고 내용이 다음 장으로 넘어가는 것을 막는다. */
+  .sec,.ws-head,.guide{ break-after:avoid; page-break-after:avoid; }
+
+  /* 표는 줄 단위로 끊고, 머리글은 장마다 되풀이한다. */
+  .terms thead{ display:table-header-group; }
+  .terms tr{ break-inside:avoid; page-break-inside:avoid; }
+
+  .check,.a-item,.a-term,.profile{ break-inside:avoid; page-break-inside:avoid; }
+
+  /* 힌트는 반드시 새 장에서 시작한다. 앞장을 넘기지 않으면 안 보이게. */
+  .annex{ break-before:page; page-break-before:always; border-top:none; margin-top:0; padding-top:0; }
+
+  p,li{ orphans:2; widows:2; }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= 질문지가 없을 때 ================= -->
+<div id="empty-view">
+  <div class="empty-box">
+    <h1>📝 면접 학습지 생성기</h1>
+    <p>만들어 둔 <b>면접 질문지</b>를 학생이 직접 답을 써 보는 <b>학습지</b>로 바꿔 줍니다.</p>
+    <p style="margin-top:1rem; color:#b45309; font-weight:700;">아직 불러올 질문지가 없습니다.</p>
+    <ol>
+      <li><b>면접질문지_생성기.html</b>로 질문지를 먼저 만들어 주세요.</li>
+      <li>두 파일을 <b>같은 폴더</b>에 두고 <b>같은 브라우저</b>로 여셔야 질문지가 보입니다.</li>
+      <li>다른 PC에서 만든 질문지라면 아래 <b>백업 파일</b>로 가져올 수 있습니다.</li>
+    </ol>
+    <button class="btn" onclick="document.getElementById('backup-input').click()">📂 백업 파일에서 불러오기</button>
+    <p style="margin-top:.9rem; font-size:.8rem;">
+      백업 파일(<code>interview_sheets_backup.json</code>)은 <b>읽기만</b> 합니다.<br>
+      이 브라우저의 설정이나 API Key를 건드리지 않습니다.
+    </p>
+  </div>
+</div>
+
+<input type="file" id="backup-input" accept=".json" style="display:none" onchange="openBackup(event)">
+
+<!-- ================= 본 화면 ================= -->
+<div class="layout" id="app" style="display:none;">
+  <aside class="sidebar print-hide">
+    <h2>학생 선택</h2>
+    <div class="meta" id="src-meta"></div>
+    <ul class="student-list" id="student-list"></ul>
+    <div class="side-foot">
+      <button class="btn gray sm" onclick="document.getElementById('backup-input').click()">📂 백업 파일 열기</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="toolbar print-hide">
+      <span class="tool-title">📝 학습지 옵션</span>
+
+      <label>답변 분량
+        <select id="opt-amount" onchange="applyOptions()">
+          <option value="30">30초 · 약 160자</option>
+          <option value="50" selected>50초 · 약 270자</option>
+          <option value="60">1분 · 약 320자</option>
+          <option value="90">1분 30초 · 약 480자</option>
+        </select>
+      </label>
+
+      <label>힌트
+        <select id="opt-hint" onchange="applyOptions()">
+          <option value="annex" selected>맨 뒤에 모아서</option>
+          <option value="inline">질문 바로 아래</option>
+          <option value="none">넣지 않기</option>
+        </select>
+      </label>
+
+      <label>용어 정리
+        <select id="opt-terms" onchange="applyOptions()">
+          <option value="blank" selected>빈칸 채우기</option>
+          <option value="show">뜻 보여주기</option>
+          <option value="none">빼기</option>
+        </select>
+      </label>
+
+      <label><input type="checkbox" id="opt-ev" checked onchange="applyOptions()"> 생기부 근거</label>
+      <label><input type="checkbox" id="opt-fu" checked onchange="applyOptions()"> 꼬리질문</label>
+      <label><input type="checkbox" id="opt-profile" onchange="applyOptions()"> 프로필 요약</label>
+
+      <span class="grow"></span>
+      <button class="btn" onclick="window.print()">🖨️ 인쇄 (PDF)</button>
+    </div>
+
+    <div class="tip print-hide">
+      <b>인쇄 창에서 세 가지만 확인하세요.</b>
+      용지 <b>A4</b> · 배율 <b>100%(기본)</b> · <b>머리글/바닥글 끄기</b>.
+      배율을 '용지에 맞춤'으로 두면 글자가 줄어 줄 간격이 흐트러집니다.
+      옅은 색 상자가 하얗게 나오면 <b>배경 그래픽</b>을 켜 주세요.
+    </div>
+
+    <div class="pick-bar print-hide" id="pick-bar" style="display:none;"></div>
+
+    <div id="paper">
+      <div class="placeholder">
+        <div class="big">📝</div>
+        <p>왼쪽에서 <strong>학생을 선택</strong>하면 학습지가 만들어집니다.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* =========================================================================
+   자료 읽기
+   ========================================================================= */
+
+const SHEET_PREFIX = 'interview_qs_';
+const OPT_KEY = 'worksheet_options';   // 이 프로그램 전용. 생성기 설정과 섞이지 않게 접두사를 달리한다.
+
+let records = [];        // [{key, rec}]
+let sourceLabel = '';
+let students = [];       // [{번호, 성명, school, items:[{key, rec}]}]
+let current = null;      // 지금 고른 학생
+let currentRec = null;   // 지금 고른 질문지
+
+function escapeHtml(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// 질문지 한 건이 학습지로 쓸 만한 모양인지 본다.
+// (형식이 어긋난 것을 목록에 올리면 고른 뒤에야 빈 화면이 나온다)
+function isUsable(rec){
+  return rec && rec.student && rec.student.성명 && rec.data
+      && Array.isArray(rec.data.commonQuestions);
+}
+
+function collect(entries, label){
+  const out = [];
+  entries.forEach(([key, raw]) => {
+    if (key.indexOf(SHEET_PREFIX) !== 0) return;
+    try {
+      const rec = JSON.parse(raw);
+      if (isUsable(rec)) out.push({ key, rec });
+    } catch (e) { /* 깨진 항목은 조용히 건너뛴다 */ }
+  });
+  records = out;
+  sourceLabel = label;
+  buildStudents();
+  return out.length;
+}
+
+function loadFromBrowser(){
+  const entries = Object.keys(localStorage).map(k => [k, localStorage.getItem(k)]);
+  return collect(entries, '이 브라우저에 저장된 질문지');
+}
+
+// 백업 파일은 읽기만 한다. localStorage에 쓰지 않으므로
+// 남의 백업을 열어도 내 API Key·설정이 덮어써지지 않는다.
+function openBackup(event){
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const obj = JSON.parse(e.target.result);
+      const n = collect(Object.keys(obj).map(k => [k, obj[k]]), '백업 파일 : ' + file.name);
+      if (!n) { alert('이 파일에서 면접 질문지를 찾지 못했습니다.\n면접질문지_생성기의 백업 파일이 맞는지 확인해주세요.'); return; }
+      enterApp();
+      alert(`질문지 ${n}건을 불러왔습니다.\n(이 브라우저에 저장하지는 않습니다)`);
+    } catch (err) {
+      alert('백업 파일을 읽지 못했습니다.');
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+// 같은 학생의 질문지를 한데 모은다. 번호와 이름이 같으면 같은 학생으로 본다.
+// (질문지 저장 이름표가 번호+이름이라 그보다 잘게 나눌 수 없다)
+function buildStudents(){
+  const map = new Map();
+  records.forEach(item => {
+    const s = item.rec.student;
+    const id = s.번호 + '_' + s.성명;
+    if (!map.has(id)) map.set(id, { 번호: s.번호, 성명: s.성명, school: item.rec.school || '', items: [] });
+    map.get(id).items.push(item);
+  });
+  students = Array.from(map.values());
+  students.forEach(st => st.items.sort((a, b) =>
+    String(b.rec.createdAt).localeCompare(String(a.rec.createdAt))));   // 최근 것이 위로
+  students.sort((a, b) => (Number(a.번호) || 0) - (Number(b.번호) || 0));
+}
+
+/* =========================================================================
+   화면
+   ========================================================================= */
+
+function enterApp(){
+  document.getElementById('empty-view').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('src-meta').innerHTML =
+    escapeHtml(sourceLabel) + '<br>학생 ' + students.length + '명 · 질문지 ' + records.length + '건';
+  renderStudentList();
+}
+
+function renderStudentList(){
+  const el = document.getElementById('student-list');
+  el.innerHTML = '';
+  students.forEach((st, i) => {
+    const li = document.createElement('li');
+    li.className = 'student-item';
+    li.innerHTML = `<span class="student-num">${escapeHtml(st.번호)}</span>`
+                 + `<span>${escapeHtml(st.성명)}</span>`
+                 + `<span class="cnt">${st.items.length}</span>`;
+    li.onclick = () => {
+      document.querySelectorAll('.student-item').forEach(x => x.classList.remove('active'));
+      li.classList.add('active');
+      selectStudent(i);
+    };
+    el.appendChild(li);
+  });
+}
+
+function selectStudent(i){
+  current = students[i];
+  currentRec = current.items[0].rec;   // 가장 최근 질문지부터 보여 준다
+  renderPickBar();
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// 한 학생에게 질문지가 여러 건이면 골라 쓸 수 있게 한다.
+function renderPickBar(){
+  const bar = document.getElementById('pick-bar');
+  if (!current || current.items.length < 2) { bar.style.display = 'none'; return; }
+
+  bar.style.display = 'block';
+  bar.innerHTML = '📄 <b>어느 질문지로 만들까요?</b> ' + current.items.map((it, i) => {
+    const d = new Date(it.rec.createdAt);
+    const when = `${d.getMonth() + 1}/${d.getDate()}`;
+    const unis = (it.rec.unis || []).map(u => u.name).join(', ');
+    const on = it.rec === currentRec ? ' class="on"' : '';
+    return `<a${on} onclick="pickSheet(${i})">${when}${unis ? ' · ' + escapeHtml(unis) : ''}</a>`;
+  }).join('');
+}
+
+function pickSheet(i){
+  currentRec = current.items[i].rec;
+  renderPickBar();
+  render();
+}
+
+/* =========================================================================
+   답변 분량
+   -------------------------------------------------------------------------
+   면접 답변은 또박또박 말해서 분당 320자 안팎이다. 흔히 쓰는 '1분 자기소개
+   300~350자'와 같은 기준이다. 여기에 맞춰 초 → 글자 수를 잡는다.
+
+   줄 수는 손글씨 기준이다. A4 본문 폭이 182mm이고 고등학생 손글씨가 한 자에
+   6.5mm쯤이니 한 줄에 28자 정도 들어간다. 그래서 줄 수 = 글자 수 ÷ 28 이다.
+   넉넉히 한 줄을 더 얹는다 — 칸이 모자라 여백에 꺾어 쓰는 것보다 낫다.
+   ========================================================================= */
+const AMOUNT = {
+  30: { label: '30초',      chars: 160, lines: 6  },
+  50: { label: '50초',      chars: 270, lines: 10 },
+  60: { label: '1분',       chars: 320, lines: 12 },
+  90: { label: '1분 30초',  chars: 480, lines: 18 }
+};
+
+function options(){
+  const sec = document.getElementById('opt-amount').value;
+  return {
+    amount:  AMOUNT[sec] ? sec : '50',
+    hint:    document.getElementById('opt-hint').value,
+    terms:   document.getElementById('opt-terms').value,
+    ev:      document.getElementById('opt-ev').checked,
+    fu:      document.getElementById('opt-fu').checked,
+    profile: document.getElementById('opt-profile').checked
+  };
+}
+
+function applyOptions(){
+  try { localStorage.setItem(OPT_KEY, JSON.stringify(options())); } catch (e) {}
+  render();
+}
+
+function loadOptions(){
+  let o;
+  try { o = JSON.parse(localStorage.getItem(OPT_KEY) || 'null'); } catch (e) { o = null; }
+  if (!o) return;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (!el || v === undefined || v === null) return;
+    if (el.type === 'checkbox') el.checked = !!v;
+    else if (Array.prototype.some.call(el.options || [], x => x.value === String(v))) el.value = String(v);
+  };
+  set('opt-amount', o.amount); set('opt-hint', o.hint); set('opt-terms', o.terms);
+  set('opt-ev', o.ev); set('opt-fu', o.fu); set('opt-profile', o.profile);
+}
+
+/* =========================================================================
+   학습지 그리기
+   ========================================================================= */
+
+// 손글씨 줄. mark를 달면 마지막 줄 아래에 '여기까지 ≈ 50초'가 붙는다.
+function ruled(n, mark){
+  return `<div class="lines">${'<div></div>'.repeat(n)}`
+       + (mark ? `<div class="mark">↑ 여기까지면 약 ${mark}</div>` : '')
+       + `</div>`;
+}
+
+function questionBlock(q, no, opt){
+  const amt = AMOUNT[opt.amount];
+
+  const ev = opt.ev ? (q.evidence || []).map(e =>
+    `<div class="ev"><span class="src">📎 ${escapeHtml(e.source || '생기부')}</span>“${escapeHtml(e.quote || '')}”</div>`
+  ).join('') : '';
+
+  // 꼬리질문은 짧게 답하는 자리다. 본답변과 같은 칸을 주면 학습지가 두 배로 두꺼워진다.
+  const fu = (opt.fu && (q.followUps || []).length)
+    ? `<div class="lbl">↳ 이어서 물어볼 수 있는 질문</div>
+       <ul class="fu">${(q.followUps || []).map(f =>
+         `<li><span class="bullet">▸</span>${escapeHtml(f)}
+            <div class="lines sub"><div></div><div></div></div></li>`).join('')}</ul>`
+    : '';
+
+  const hint = (opt.hint === 'inline' && (q.answerPoints || []).length)
+    ? `<div class="hint-inline"><b>💡 이런 내용이 들어가면 좋습니다</b>
+         <ul>${(q.answerPoints || []).map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul></div>`
+    : '';
+
+  return `<div class="q">
+      <div class="q-head"><span class="q-no">${escapeHtml(no)}</span>
+        <span class="q-text">${escapeHtml(q.question || '')}</span></div>
+      ${ev}
+      <div class="ans-wrap">
+        <div class="lbl">✍️ 내 답변
+          <span class="amount">${amt.label} 분량 · 약 ${amt.chars}자</span></div>
+        ${ruled(amt.lines, amt.label)}
+      </div>
+      ${fu}
+      ${hint}
+    </div>`;
+}
+
+// 별지에 넣을 힌트를 모은다. 본문에서 매긴 번호를 그대로 달아 찾아보기 쉽게 한다.
+function collectHints(d){
+  const out = [];
+  (d.commonQuestions || []).forEach((q, i) => {
+    if ((q.answerPoints || []).length) out.push({ no: 'Q' + (i + 1), q: q.question, points: q.answerPoints });
+  });
+  (d.universityQuestions || []).forEach(u => {
+    (u.questions || []).forEach((q, i) => {
+      if ((q.answerPoints || []).length)
+        out.push({ no: (u.university || '').slice(0, 2) + (i + 1), q: q.question, points: q.answerPoints });
+    });
+  });
+  return out;
+}
+
+function render(){
+  if (!currentRec) return;
+  const opt = options();
+  const amt = AMOUNT[opt.amount];
+  const rec = currentRec;
+  const d = rec.data || {};
+  const who = `${rec.school ? rec.school + ' ' : ''}${rec.student.번호}번 ${rec.student.성명}`;
+
+  let html = '<div class="paper">';
+
+  /* 머리말 */
+  html += `<div class="ws-head">
+      <h1>면접 준비 학습지</h1>
+      <div class="who">
+        ${escapeHtml(rec.school || '')}
+        <b>${escapeHtml(rec.student.번호)}번 ${escapeHtml(rec.student.성명)}</b>
+        &nbsp;·&nbsp; 작성일 <span class="fill">&nbsp;</span>
+      </div>
+      ${(rec.unis || []).length ? `<div class="unis">🎯 ${rec.unis.map(u =>
+          `<b>${escapeHtml(u.name)}</b> ${escapeHtml(u.admType)}`).join(' · ')}</div>` : ''}
+    </div>`;
+
+  /* 사용법 안내 */
+  html += `<div class="guide">
+      <b>이렇게 쓰세요.</b>
+      ① 질문을 읽고 <b>힌트를 보기 전에</b> 내 말로 답을 써 봅니다.
+      ② 답에는 반드시 <b>내가 한 일과 그때 배운 것</b>이 들어가야 합니다.
+      ③ 다 쓴 뒤 <b>소리 내어 읽으며 시간을 재</b> 봅니다.
+      칸을 다 채우면 <b>${amt.label}(약 ${amt.chars}자)</b>입니다.
+      ${opt.hint === 'annex' ? '④ 마지막 장의 <b>힌트</b>와 견주어 빠진 내용을 채웁니다.' : ''}
+    </div>`;
+
+  if (opt.profile && d.profileSummary) {
+    html += `<div class="profile"><b>선생님이 본 나의 생기부</b><br>${escapeHtml(d.profileSummary)}</div>`;
+  }
+
+  /* 공통 질문 */
+  if ((d.commonQuestions || []).length) {
+    html += `<div class="sec">공통 질문 <small>어느 대학 면접에서나 나올 수 있는 질문입니다.</small></div>`;
+    d.commonQuestions.forEach((q, i) => { html += questionBlock(q, 'Q' + (i + 1), opt); });
+  }
+
+  /* 대학별 특화 질문 */
+  (d.universityQuestions || []).forEach(u => {
+    html += `<div class="sec uni">${escapeHtml(u.university || '')} ${escapeHtml(u.admissionType || '')} 대비 질문
+             ${u.focus ? `<small>${escapeHtml(u.focus)}</small>` : ''}</div>`;
+    (u.questions || []).forEach((q, i) => {
+      html += questionBlock(q, (u.university || '').slice(0, 2) + (i + 1), opt);
+    });
+  });
+
+  /* 용어 정리 */
+  if (opt.terms !== 'none' && (d.keyTerms || []).length) {
+    const blank = opt.terms === 'blank';
+    html += `<div class="sec">📖 생기부 용어 점검
+        <small>${blank
+          ? '내 생기부에 적힌 말입니다. 면접관이 물으면 어떻게 설명할지 직접 써 보세요.'
+          : '면접관이 “이건 무슨 뜻인가요?”라고 물을 수 있는 말들입니다.'}</small></div>
+      <table class="terms">
+        <thead><tr>
+          <th style="width:22%;">용어</th>
+          <th style="width:46%;">${blank ? '내가 설명해 보기' : '이렇게 설명하세요'}</th>
+          <th style="width:32%;">확인 질문</th>
+        </tr></thead>
+        <tbody>${d.keyTerms.map(t => `<tr>
+            <td><b>${escapeHtml(t.term || '')}</b>
+                ${t.source ? `<span class="t-src">${escapeHtml(t.source)}</span>` : ''}</td>
+            <td>${blank
+                  ? '<div class="w-lines"><div></div><div></div><div></div></div>'
+                  : escapeHtml(t.meaning || '')}</td>
+            <td class="t-q">${escapeHtml(t.checkQuestion || '')}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+  }
+
+  /* 점검표 */
+  if ((d.preparationTips || []).length) {
+    html += `<div class="sec">✅ 면접 전 점검표 <small>면접 전날 하나씩 확인하세요.</small></div>
+      <div class="check"><ul>${d.preparationTips.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`;
+  }
+
+  /* 별지 — 힌트 모음 */
+  if (opt.hint === 'annex') {
+    const hints = collectHints(d);
+    const showTerms = opt.terms === 'blank' && (d.keyTerms || []).length;
+    if (hints.length || showTerms) {
+      html += `<div class="annex">
+        <div class="annex-head"><b>💡 힌트 — 스스로 다 쓴 뒤에 펼쳐 보세요.</b><br>
+          먼저 답을 써 보지 않고 이곳부터 읽으면 <b>내 말이 아니라 외운 말</b>이 됩니다.</div>
+        <div class="annex-who">${escapeHtml(who)} 학습지 힌트</div>`;
+
+      hints.forEach(h => {
+        html += `<div class="a-item">
+            <div class="a-q">${escapeHtml(h.no)}. ${escapeHtml(h.q)}</div>
+            <ul>${h.points.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
+          </div>`;
+      });
+
+      if (showTerms) {
+        html += `<div class="sec" style="margin-top:7mm;">📖 용어 풀이</div>`;
+        d.keyTerms.forEach(t => {
+          html += `<div class="a-term"><b>${escapeHtml(t.term || '')}</b>
+              ${t.source ? `<span style="color:#64748b; font-size:8.5pt;"> (${escapeHtml(t.source)})</span>` : ''}
+              — ${escapeHtml(t.meaning || '')}</div>`;
+        });
+      }
+      html += `</div>`;
+    }
+  }
+
+  html += '</div>';
+  document.getElementById('paper').innerHTML = html;
+}
+
+/* =========================================================================
+   시작
+   ========================================================================= */
+
+window.addEventListener('DOMContentLoaded', () => {
+  loadOptions();
+  if (loadFromBrowser() > 0) enterApp();
+  else document.getElementById('empty-view').style.display = 'flex';
+});
+</script>
+</body>
+</html>
